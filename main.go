@@ -4,31 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"strings"
 
 	"fllnexusreports/csvmap"
 	"fllnexusreports/excel"
 )
-
-func printSample(title string, rows []map[string]string, keys map[string]int, n int) {
-	fmt.Printf("--- %s (%d rows) ---\n", title, len(rows))
-	end := n
-	if end > len(rows) {
-		end = len(rows)
-	}
-	for i := 0; i < end; i++ {
-		r := rows[i]
-		// print keys
-		parts := []string{}
-		for i, k := range keys {
-			fmt.Printf("i=%v, k=%v\n", i, k)
-			parts = append(parts, fmt.Sprintf("%s=%s", i, r[i]))
-		}
-		fmt.Println(strings.Join(parts, ", "))
-		_ = parts
-		_ = r
-	}
-}
 
 func main() {
 	var spreadsheetName string
@@ -46,20 +25,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("teams read error: %v", err)
 	}
-	printSample("Teams", teams, team_keys, 5)
 
 	judging, judging_keys, judging_headers, err := csvmap.ReadCSVToMaps(judgingschedulecsv)
 	if err != nil {
 		log.Fatalf("judging read error: %v", err)
 	}
-	printSample("Judging", judging, judging_keys, 5)
-
 	games, game_keys, game_headers, err := csvmap.ReadCSVToMaps(gameschedulecsv)
 	if err != nil {
 		log.Fatalf("game schedule read error: %v", err)
 	}
-	printSample("Games", games, game_keys, 5)
-
 	if spreadsheetName != "" {
 		e := excel.CreateExcelFile()
 		if err != nil {

@@ -17,6 +17,12 @@ type Matches struct {
 	CompMatches []Match
 }
 
+type WildCardMatch struct {
+	WildCardTable string
+	ActiveTable   string
+	Time          string
+}
+
 func GetTeamMatchTable(teams []map[string]string, matches []map[string]string, match_keys map[string]int) map[string]Matches {
 	team_match_table := map[string]Matches{}
 	table_order := []string{}
@@ -100,4 +106,93 @@ func GetMaxCompetitionMatches(team_matches map[string]Matches) int {
 		}
 	}
 	return max
+}
+
+func FindWildCardMatches(matches []map[string]string, headers map[string]int) []WildCardMatch {
+	// determine table pairs
+	table_pairs := map[int]string{}
+	for header, idx := range headers {
+		if idx > 1 {
+			table_pairs[idx-2] = header
+		}
+	}
+	wildcard_matches := []WildCardMatch{}
+	for _, match := range matches {
+		for i := 0; i < len(table_pairs); i += 2 {
+			wildcardtable := ""
+			activetable := ""
+			if match[table_pairs[i]] == "" || match[table_pairs[i+1]] == "" {
+				if match[table_pairs[i]] != "" {
+					// the other table is the empty one
+					wildcardtable = table_pairs[i+1]
+					activetable = table_pairs[i]
+				}
+				if match[table_pairs[i+1]] != "" {
+					// the other table is the empty one
+					wildcardtable = table_pairs[i]
+					activetable = table_pairs[i+1]
+				}
+				if wildcardtable != "" {
+					wildcard_matches = append(wildcard_matches, WildCardMatch{
+						WildCardTable: wildcardtable,
+						ActiveTable:   activetable,
+						Time:          match["time"],
+					})
+				}
+			}
+		}
+	}
+	return wildcard_matches
+}
+
+func IsWildCardMatchOnOtherTable(wildcard_matches []WildCardMatch, time string, table string) bool {
+	for _, wm := range wildcard_matches {
+		// Normalize from "09:30 AM" to "09:30AM" to parse correctly
+		re := regexp.MustCompile(`\s+`) // Matches one or more whitespace characters
+		time1 := re.ReplaceAllString(wm.Time, "")
+		time2 := re.ReplaceAllString(time, "")
+		if time1 == time2 && wm.ActiveTable == table {
+			return true
+		}
+	}
+	return false
+}
+
+func IsWildCardMatchOnTable(wildcard_matches []WildCardMatch, time string, table string) bool {
+	for _, wm := range wildcard_matches {
+		// Normalize from "09:30 AM" to "09:30AM" to parse correctly
+		re := regexp.MustCompile(`\s+`) // Matches one or more whitespace characters
+		time1 := re.ReplaceAllString(wm.Time, "")
+		time2 := re.ReplaceAllString(time, "")
+		if time1 == time2 && wm.WildCardTable == table {
+			return true
+		}
+	}
+	return false
+}
+
+func GetWildCardMatchOnOtherTable(wildcard_matches []WildCardMatch, time string, table string) WildCardMatch {
+	for _, wm := range wildcard_matches {
+		// Normalize from "09:30 AM" to "09:30AM" to parse correctly
+		re := regexp.MustCompile(`\s+`) // Matches one or more whitespace characters
+		time1 := re.ReplaceAllString(wm.Time, "")
+		time2 := re.ReplaceAllString(time, "")
+		if time1 == time2 && wm.ActiveTable == table {
+			return wm
+		}
+	}
+	return WildCardMatch{}
+}
+
+func GetWildCardMatchOnTable(wildcard_matches []WildCardMatch, time string, table string) WildCardMatch {
+	for _, wm := range wildcard_matches {
+		// Normalize from "09:30 AM" to "09:30AM" to parse correctly
+		re := regexp.MustCompile(`\s+`) // Matches one or more whitespace characters
+		time1 := re.ReplaceAllString(wm.Time, "")
+		time2 := re.ReplaceAllString(time, "")
+		if time1 == time2 && wm.WildCardTable == table {
+			return wm
+		}
+	}
+	return WildCardMatch{}
 }

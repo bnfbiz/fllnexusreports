@@ -337,14 +337,22 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 	team_match_table := matchespkg.GetTeamMatchTable(teams, matches, match_keys)
 	practiceMatchesExist := matchespkg.HasPracticeMatches(team_match_table)
 	compMatches := matchespkg.GetMaxCompetitionMatches(team_match_table)
-	fmt.Printf("Practice matches exist: %v, comp matches: %d\n", practiceMatchesExist, compMatches)
+	wildCardMatches := matchespkg.FindWildCardMatches(matches, match_keys)
 
 	e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_TEAM_NUMREF, row), "Team #")
 	e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_TEAM_NAMEREF, row), "Team Name")
 	e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_JUDGING_STARTREF, row), "Judging Start")
 	e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_JUDGING_COLOR_REF, row), "Judging Color")
+	cellFormatString := "C"
 	practiceOffset := 0
+	wildCardRows := map[int]int{}
 	if practiceMatchesExist {
+		colRef, err := excelize.ColumnNumberToName(lastCol)
+		if err != nil {
+			return false, fmt.Errorf("failed to get column ref: %w", err)
+		}
+		cellFormatString += colRef
+
 		tableRef, err := excelize.CoordinatesToCellName(colref, row)
 		if err != nil {
 			return false, fmt.Errorf("failed to get practice table ref: %w", err)
@@ -357,8 +365,15 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 		e.excelFile.SetCellValue(sheetName, timeRef, "Practice Table")
 		practiceOffset = 2
 		lastCol = colref + 1
+		wildCardRows[0] = len(teams) + 2 // after all teams
 	}
 	for i := 1; i <= compMatches; i++ {
+		colRef, err := excelize.ColumnNumberToName(lastCol)
+		if err != nil {
+			return false, fmt.Errorf("failed to get column ref: %w", err)
+		}
+		cellFormatString += colRef
+
 		tableRef, err := excelize.CoordinatesToCellName(colref+practiceOffset+(i-1)*2, row)
 		if err != nil {
 			return false, fmt.Errorf("failed to get table offset ref: %w", err)
@@ -371,7 +386,13 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 		e.excelFile.SetCellValue(sheetName, timeRef, fmt.Sprintf("Round %d Table", i))
 		// Keep track of the last column used for the formatting later
 		lastCol = colref + 1 + practiceOffset + (i-1)*2
+		wildCardRows[i] = len(teams) + 2 // after all teams
 	}
+	colRef, err := excelize.ColumnNumberToName(lastCol)
+	if err != nil {
+		return false, fmt.Errorf("failed to get column ref: %w", err)
+	}
+	cellFormatString += colRef
 
 	row++
 
@@ -400,6 +421,7 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 		return judging_keys[room_order[i]] < judging_keys[room_order[j]]
 	})
 
+	wild_card_matches_exist := false
 	for _, judgingSlot := range judging {
 		for _, room := range room_order {
 			match := team_match_table[judgingSlot[room]]
@@ -419,6 +441,21 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 						return false, fmt.Errorf("failed to get practice time ref: %w", err)
 					}
 					e.excelFile.SetCellValue(sheetName, timeRef, match_headers[match.Practice.Table])
+					if matchespkg.IsWildCardMatchOnOtherTable(wildCardMatches, match.Practice.Time, match.Practice.Table) {
+						wild_card_matches_exist = true
+						wild_card_match := matchespkg.GetWildCardMatchOnOtherTable(wildCardMatches, match.Practice.Time, match.Practice.Table)
+						tableRef, err := excelize.CoordinatesToCellName(colref, wildCardRows[0])
+						if err != nil {
+							return false, fmt.Errorf("failed to get practice table ref: %w", err)
+						}
+						e.excelFile.SetCellValue(sheetName, tableRef, wild_card_match.Time)
+						timeRef, err := excelize.CoordinatesToCellName(colref+1, wildCardRows[0])
+						if err != nil {
+							return false, fmt.Errorf("failed to get practice time ref: %w", err)
+						}
+						e.excelFile.SetCellValue(sheetName, timeRef, match_headers[wild_card_match.WildCardTable])
+						wildCardRows[0]++
+					}
 				}
 				for i := 1; i <= compMatches; i++ {
 					tableRef, err := excelize.CoordinatesToCellName(colref+practiceOffset+(i-1)*2, row)
@@ -431,10 +468,29 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 						return false, fmt.Errorf("failed to get time offset ref: %w", err)
 					}
 					e.excelFile.SetCellValue(sheetName, timeRef, match_headers[match.CompMatches[i-1].Table])
+					if matchespkg.IsWildCardMatchOnOtherTable(wildCardMatches, match.CompMatches[i-1].Time, match.CompMatches[i-1].Table) {
+						wild_card_matches_exist = true
+						wild_card_match := matchespkg.GetWildCardMatchOnOtherTable(wildCardMatches, match.CompMatches[i-1].Time, match.CompMatches[i-1].Table)
+						tableRef, err := excelize.CoordinatesToCellName(colref+practiceOffset+(i-1)*2, wildCardRows[i])
+						if err != nil {
+							return false, fmt.Errorf("failed to get table offset ref: %w", err)
+						}
+						e.excelFile.SetCellValue(sheetName, tableRef, wild_card_match.Time)
+						timeRef, err := excelize.CoordinatesToCellName(colref+1+practiceOffset+(i-1)*2, wildCardRows[i])
+						if err != nil {
+							return false, fmt.Errorf("failed to get time offset ref: %w", err)
+						}
+						e.excelFile.SetCellValue(sheetName, timeRef, match_headers[wild_card_match.WildCardTable])
+						wildCardRows[i]++
+					}
 				}
 				row++
 			}
 		}
+	}
+	if wild_card_matches_exist {
+		e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_TEAM_NAMEREF, row), "Wild Card Team")
+		row++
 	}
 
 	lastColRef, err := excelize.ColumnNumberToName(lastCol)
@@ -443,7 +499,11 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 	}
 
 	// resize the columns appropriately
-	for _, r := range "ACDEFGHIJKLM" {
+	for c := 1; c <= lastCol; c++ {
+		r, err := excelize.ColumnNumberToName(c)
+		if err != nil {
+			return false, fmt.Errorf("failed to get column name for c=%d: %w", c, err)
+		}
 		c := string(r)
 		colWidth := e.GetMaxColumnWidth(sheetName, c, 1, len(teams)+1)
 		if err := e.excelFile.SetColWidth(sheetName, c, c, float64(colWidth)); err != nil {
@@ -454,25 +514,24 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 		return false, fmt.Errorf("failed to set column width: %w", err)
 	}
 
-	fmt.Printf("LastColRef is %s/%v\n", lastColRef, lastColRef)
 	// Put the gray bars on alternating rows and borders
-	for r := 1; r <= len(teams)+1; r++ {
+	for r := 1; r <= row; r++ {
 		if r == 1 {
 			// Header row
 			e.excelFile.SetCellStyle(sheetName, fmt.Sprintf("A%d", r), fmt.Sprintf("%s%d", lastColRef, r), e.styleBold)
-			for _, ch := range "CEGIKM" {
+			for _, ch := range cellFormatString {
 				c := string(ch)
 				e.excelFile.SetCellStyle(sheetName, fmt.Sprintf("%s%d", c, r), fmt.Sprintf("%s%d", c, r), e.styleBoldBorder)
 			}
 		} else if (r % 2) == 0 {
 			e.excelFile.SetCellStyle(sheetName, fmt.Sprintf("A%d", r), fmt.Sprintf("%s%d", lastColRef, r), e.styleGreyBar)
 			// Put the borders dividing the types
-			for _, ch := range "CEGIKM" {
+			for _, ch := range cellFormatString {
 				c := string(ch)
 				e.excelFile.SetCellStyle(sheetName, fmt.Sprintf("%s%d", c, r), fmt.Sprintf("%s%d", c, r), e.styleGreyBarBorder)
 			}
 		} else {
-			for _, ch := range "CEGIKM" {
+			for _, ch := range cellFormatString {
 				c := string(ch)
 				e.excelFile.SetCellStyle(sheetName, fmt.Sprintf("%s%d", c, r), fmt.Sprintf("%s%d", c, r), e.styleBorderLeft)
 			}
@@ -668,6 +727,7 @@ func (e *excelInfo) CreateMatchQueueSheet(sheetName string,
 	e.excelFile.SetCellStyle(sheetName, fmt.Sprintf(e.MATCH_TEAM_NUMREF, row-1), fmt.Sprintf(e.MATCH_TABLE_REF, row), e.styleBold)
 	row++
 
+	wildCardMatches := matchespkg.FindWildCardMatches(matches, match_keys)
 	sort.Slice(matches, func(i, j int) bool {
 		// Normalize from "09:30 AM" to "09:30AM" to parse correctly
 		re := regexp.MustCompile(`\s+`) // Matches one or more whitespace characters
@@ -694,7 +754,6 @@ func (e *excelInfo) CreateMatchQueueSheet(sheetName string,
 	})
 
 	rounds := map[string]int{}
-	fmt.Printf("Table order: %v\n", table_order)
 	for _, table := range table_order {
 		for _, match := range matches {
 			if match[table] != "" {
@@ -708,6 +767,13 @@ func (e *excelInfo) CreateMatchQueueSheet(sheetName string,
 				}
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_START_REF, row), match["time"])
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TABLE_REF, row), match_headers[table])
+				row++
+			} else if matchespkg.IsWildCardMatchOnTable(wildCardMatches, match["time"], table) {
+				wild_card_match := matchespkg.GetWildCardMatchOnTable(wildCardMatches, match["time"], table)
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TEAM_NAMEREF, row), "Wild Card Team")
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_ROUND_REF, row), "Wild Card")
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_START_REF, row), wild_card_match.Time)
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TABLE_REF, row), match_headers[wild_card_match.WildCardTable])
 				row++
 			}
 		}
@@ -730,7 +796,7 @@ func (e *excelInfo) CreateMatchQueueSheet(sheetName string,
 	// resize the columns appropriately
 	for _, r := range "ACDE" {
 		c := string(r)
-		colWidth := e.GetMaxColumnWidth(sheetName, c, 2, len(teams))
+		colWidth := e.GetMaxColumnWidth(sheetName, c, 2, row)
 		if err := e.excelFile.SetColWidth(sheetName, c, c, float64(colWidth+1.0)); err != nil {
 			return false, fmt.Errorf("failed to set column width: %w", err)
 		}
@@ -849,6 +915,7 @@ func (e *excelInfo) CreateEmceeSheet(sheetName string,
 	lastTime := matches[0]["time"]
 	grayLine := false
 	count := 0
+	wildCardMatches := matchespkg.FindWildCardMatches(matches, match_keys)
 	for _, match := range matches {
 		for _, table := range table_order {
 			if match[table] != "" {
@@ -857,7 +924,6 @@ func (e *excelInfo) CreateEmceeSheet(sheetName string,
 					row++
 					grayLine = !grayLine
 					if (count % 15) == 0 {
-						fmt.Println("Inserting page break at row:", row)
 						e.excelFile.InsertPageBreak(sheetName, fmt.Sprintf(e.EMCEE_COLUMNBREAK_REF, row))
 						grayLine = false
 						count = 0
@@ -877,37 +943,30 @@ func (e *excelInfo) CreateEmceeSheet(sheetName string,
 				}
 				row++
 				count++
+			} else if matchespkg.IsWildCardMatchOnTable(wildCardMatches, match["time"], table) {
+				if lastTime != match["time"] && row > 3 {
+					lastTime = match["time"]
+					row++
+					grayLine = !grayLine
+					if (count % 15) == 0 {
+						e.excelFile.InsertPageBreak(sheetName, fmt.Sprintf(e.EMCEE_COLUMNBREAK_REF, row))
+						grayLine = false
+						count = 0
+					}
+				}
+				wild_card_match := matchespkg.GetWildCardMatchOnTable(wildCardMatches, match["time"], table)
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.EMCEE_TEAM_NAMEREF, row), "Wild Card Team")
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.EMCEE_ROUND_REF, row), "Wild Card")
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_START_REF, row), wild_card_match.Time)
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TABLE_REF, row), match_headers[wild_card_match.WildCardTable])
+				if grayLine {
+					e.excelFile.SetCellStyle(sheetName, fmt.Sprintf(e.EMCEE_TEAM_NUMREF, row), fmt.Sprintf(e.EMCEE_TABLE_REF, row), e.styleGreyBar)
+				}
+				row++
+				count++
 			}
 		}
 	}
-	// for _, match := range matches {
-	// 	if schedule.IsMatch(slotInfo.Slot) {
-
-	// 		if teamList.IsTeamNumber(slotInfo.TeamNumber) {
-	// 			row++
-	// 			count++
-	// 			e.excelFile.SetCellFormula(sheetName, fmt.Sprintf(e.EMCEE_TEAM_NUMREF, row), "='"+SHEETNAME_TEAM_LIST+"'!"+fmt.Sprintf(e.TEAMLIST_TEAMNUMBER_REF, slotInfo.TeamNumber+1))
-	// 			e.excelFile.SetCellFormula(sheetName, fmt.Sprintf(e.EMCEE_TEAM_NAMEREF, row), "='"+SHEETNAME_TEAM_LIST+"'!"+fmt.Sprintf(e.TEAMLIST_TEAMNAME_REF, slotInfo.TeamNumber+1))
-	// 			e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.EMCEE_ROUND_REF, row), schedule.GetRoundName(slotInfo.Slot))
-	// 			e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.EMCEE_START_REF, row), slotInfo.Start.Format("03:04 PM"))
-	// 			e.excelFile.SetCellFormula(sheetName, fmt.Sprintf(e.EMCEE_TABLE_REF, row), "='"+SHEETNAME_TOURNAMENT_SETUP+"'!"+fmt.Sprintf(GAMETABLESCOLUMNREF, schedule.GetTableOffset(slotInfo.Location)+GAMETABLESROWREF))
-	// 			if grayLine {
-	// 				e.excelFile.SetCellStyle(sheetName, fmt.Sprintf(e.EMCEE_TEAM_NUMREF, row), fmt.Sprintf(e.EMCEE_TABLE_REF, row), e.styleGreyBar)
-	// 			}
-	// 		} else if teamList.IsWildCardTeam(slotInfo.TeamNumber) {
-	// 			row++
-	// 			count++
-	// 			// Wild Card Team so don't print the team number
-	// 			e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.EMCEE_TEAM_NAMEREF, row), "Wild Card Team")
-	// 			e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.EMCEE_ROUND_REF, row), schedule.GetRoundName(slotInfo.Slot))
-	// 			e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.EMCEE_START_REF, row), slotInfo.Start.Format("03:04 PM"))
-	// 			e.excelFile.SetCellFormula(sheetName, fmt.Sprintf(e.EMCEE_TABLE_REF, row), "='"+SHEETNAME_TOURNAMENT_SETUP+"'!"+fmt.Sprintf(GAMETABLESCOLUMNREF, schedule.GetTableOffset(slotInfo.Location)+GAMETABLESROWREF))
-	// 			if grayLine {
-	// 				e.excelFile.SetCellStyle(sheetName, fmt.Sprintf(e.EMCEE_TEAM_NUMREF, row), fmt.Sprintf(e.EMCEE_TABLE_REF, row), e.styleGreyBar)
-	// 			}
-	// 		}
-	// 	}
-	// }
 	e.excelFile.InsertPageBreak(sheetName, fmt.Sprintf(e.EMCEE_TEAM_NUMREF, row+1))
 
 	// Put the borders
@@ -918,7 +977,7 @@ func (e *excelInfo) CreateEmceeSheet(sheetName string,
 	// resize the columns appropriately
 	for _, r := range "ACDE" {
 		c := string(r)
-		colWidth := e.GetMaxColumnWidth(sheetName, c, 2, len(teams))
+		colWidth := e.GetMaxColumnWidth(sheetName, c, 2, row)
 		if err := e.excelFile.SetColWidth(sheetName, c, c, float64(colWidth+1.0)); err != nil {
 			return false, fmt.Errorf("failed to set column width: %w", err)
 		}
