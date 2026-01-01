@@ -303,9 +303,9 @@ func (e *excelInfo) GetMaxColumnWidth(sheetName string, column string, startRow 
 }
 
 func (e *excelInfo) CreateScheduleSheet(sheetName string,
-	teams []map[string]string, team_keys map[string]int,
-	judging []map[string]string, judging_keys map[string]int, judging_headers map[string]string,
-	matches []map[string]string, match_keys map[string]int, match_headers map[string]string) (bool, error) {
+	teams []map[string]string, teamKeys map[string]int,
+	judging []map[string]string, judgingKeys map[string]int, judgingHeaders map[string]string,
+	matches []map[string]string, matchKeys map[string]int, matchHeaders map[string]string) (bool, error) {
 	fmt.Printf("Creating sheet: %s\n", sheetName)
 	if e.excelFile == nil {
 		return false, fmt.Errorf("excel file is not initialized")
@@ -334,10 +334,10 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 	lastCol := colref
 
 	// Get a map of teams and matches
-	team_match_table := matchespkg.GetTeamMatchTable(teams, matches, match_keys)
-	practiceMatchesExist := matchespkg.HasPracticeMatches(team_match_table)
-	compMatches := matchespkg.GetMaxCompetitionMatches(team_match_table)
-	wildCardMatches := matchespkg.FindWildCardMatches(matches, match_keys)
+	teamMatchTable := matchespkg.GetTeamMatchTable(teams, matches, matchKeys)
+	practiceMatchesExist := matchespkg.HasPracticeMatches(teamMatchTable)
+	compMatches := matchespkg.GetMaxCompetitionMatches(teamMatchTable)
+	wildCardMatches := matchespkg.FindWildCardMatches(matches, matchKeys)
 
 	e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_TEAM_NUMREF, row), "Team #")
 	e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_TEAM_NAMEREF, row), "Team Name")
@@ -346,12 +346,12 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 	cellFormatString := "C"
 	practiceOffset := 0
 	wildCardRows := map[int]int{}
+	colRef, err := excelize.ColumnNumberToName(lastCol)
+	if err != nil {
+		return false, fmt.Errorf("failed to get column ref: %w", err)
+	}
+	cellFormatString += colRef
 	if practiceMatchesExist {
-		colRef, err := excelize.ColumnNumberToName(lastCol)
-		if err != nil {
-			return false, fmt.Errorf("failed to get column ref: %w", err)
-		}
-		cellFormatString += colRef
 
 		tableRef, err := excelize.CoordinatesToCellName(colref, row)
 		if err != nil {
@@ -366,13 +366,13 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 		practiceOffset = 2
 		lastCol = colref + 1
 		wildCardRows[0] = len(teams) + 2 // after all teams
-	}
-	for i := 1; i <= compMatches; i++ {
-		colRef, err := excelize.ColumnNumberToName(lastCol)
+		colRef, err := excelize.ColumnNumberToName(lastCol + 1)
 		if err != nil {
 			return false, fmt.Errorf("failed to get column ref: %w", err)
 		}
 		cellFormatString += colRef
+	}
+	for i := 1; i <= compMatches; i++ {
 
 		tableRef, err := excelize.CoordinatesToCellName(colref+practiceOffset+(i-1)*2, row)
 		if err != nil {
@@ -387,12 +387,12 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 		// Keep track of the last column used for the formatting later
 		lastCol = colref + 1 + practiceOffset + (i-1)*2
 		wildCardRows[i] = len(teams) + 2 // after all teams
+		colRef, err := excelize.ColumnNumberToName(lastCol + 1)
+		if err != nil {
+			return false, fmt.Errorf("failed to get column ref: %w", err)
+		}
+		cellFormatString += colRef
 	}
-	colRef, err := excelize.ColumnNumberToName(lastCol)
-	if err != nil {
-		return false, fmt.Errorf("failed to get column ref: %w", err)
-	}
-	cellFormatString += colRef
 
 	row++
 
@@ -411,25 +411,25 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 		}
 		return itime.Before(jtime)
 	})
-	room_order := []string{}
-	for r := range judging_keys {
+	roomOrder := []string{}
+	for r := range judgingKeys {
 		if (r != "time") && (r != "notes") {
-			room_order = append(room_order, r)
+			roomOrder = append(roomOrder, r)
 		}
 	}
-	sort.Slice(room_order, func(i, j int) bool {
-		return judging_keys[room_order[i]] < judging_keys[room_order[j]]
+	sort.Slice(roomOrder, func(i, j int) bool {
+		return judgingKeys[roomOrder[i]] < judgingKeys[roomOrder[j]]
 	})
 
-	wild_card_matches_exist := false
+	wildCardMatchesExist := false
 	for _, judgingSlot := range judging {
-		for _, room := range room_order {
-			match := team_match_table[judgingSlot[room]]
+		for _, room := range roomOrder {
+			match := teamMatchTable[judgingSlot[room]]
 			if judgingSlot[room] != "" {
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_TEAM_NUMREF, row), judgingSlot[room])
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_TEAM_NAMEREF, row), getTeamNameByNumber(teams, judgingSlot[room]))
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_JUDGING_STARTREF, row), judgingSlot["time"])
-				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_JUDGING_COLOR_REF, row), judging_headers[room])
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_JUDGING_COLOR_REF, row), judgingHeaders[room])
 				if match.HasPractice {
 					tableRef, err := excelize.CoordinatesToCellName(colref, row)
 					if err != nil {
@@ -440,9 +440,9 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 					if err != nil {
 						return false, fmt.Errorf("failed to get practice time ref: %w", err)
 					}
-					e.excelFile.SetCellValue(sheetName, timeRef, match_headers[match.Practice.Table])
+					e.excelFile.SetCellValue(sheetName, timeRef, matchHeaders[match.Practice.Table])
 					if matchespkg.IsWildCardMatchOnOtherTable(wildCardMatches, match.Practice.Time, match.Practice.Table) {
-						wild_card_matches_exist = true
+						wildCardMatchesExist = true
 						wild_card_match := matchespkg.GetWildCardMatchOnOtherTable(wildCardMatches, match.Practice.Time, match.Practice.Table)
 						tableRef, err := excelize.CoordinatesToCellName(colref, wildCardRows[0])
 						if err != nil {
@@ -453,7 +453,7 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 						if err != nil {
 							return false, fmt.Errorf("failed to get practice time ref: %w", err)
 						}
-						e.excelFile.SetCellValue(sheetName, timeRef, match_headers[wild_card_match.WildCardTable])
+						e.excelFile.SetCellValue(sheetName, timeRef, matchHeaders[wild_card_match.WildCardTable])
 						wildCardRows[0]++
 					}
 				}
@@ -467,9 +467,9 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 					if err != nil {
 						return false, fmt.Errorf("failed to get time offset ref: %w", err)
 					}
-					e.excelFile.SetCellValue(sheetName, timeRef, match_headers[match.CompMatches[i-1].Table])
+					e.excelFile.SetCellValue(sheetName, timeRef, matchHeaders[match.CompMatches[i-1].Table])
 					if matchespkg.IsWildCardMatchOnOtherTable(wildCardMatches, match.CompMatches[i-1].Time, match.CompMatches[i-1].Table) {
-						wild_card_matches_exist = true
+						wildCardMatchesExist = true
 						wild_card_match := matchespkg.GetWildCardMatchOnOtherTable(wildCardMatches, match.CompMatches[i-1].Time, match.CompMatches[i-1].Table)
 						tableRef, err := excelize.CoordinatesToCellName(colref+practiceOffset+(i-1)*2, wildCardRows[i])
 						if err != nil {
@@ -480,7 +480,7 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 						if err != nil {
 							return false, fmt.Errorf("failed to get time offset ref: %w", err)
 						}
-						e.excelFile.SetCellValue(sheetName, timeRef, match_headers[wild_card_match.WildCardTable])
+						e.excelFile.SetCellValue(sheetName, timeRef, matchHeaders[wild_card_match.WildCardTable])
 						wildCardRows[i]++
 					}
 				}
@@ -488,7 +488,7 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 			}
 		}
 	}
-	if wild_card_matches_exist {
+	if wildCardMatchesExist {
 		e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.SCHEDULE_TEAM_NAMEREF, row), "Wild Card Team")
 		row++
 	}
@@ -526,10 +526,13 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 		} else if (r % 2) == 0 {
 			e.excelFile.SetCellStyle(sheetName, fmt.Sprintf("A%d", r), fmt.Sprintf("%s%d", lastColRef, r), e.styleGreyBar)
 			// Put the borders dividing the types
-			for _, ch := range cellFormatString {
+			for _, ch := range cellFormatString[:len(cellFormatString)-1] {
 				c := string(ch)
 				e.excelFile.SetCellStyle(sheetName, fmt.Sprintf("%s%d", c, r), fmt.Sprintf("%s%d", c, r), e.styleGreyBarBorder)
 			}
+			// Handle last column to only put in the vertical border
+			c := string(cellFormatString[len(cellFormatString)-1])
+			e.excelFile.SetCellStyle(sheetName, fmt.Sprintf("%s%d", c, r), fmt.Sprintf("%s%d", c, r), e.styleBorderLeft)
 		} else {
 			for _, ch := range cellFormatString {
 				c := string(ch)
@@ -552,9 +555,9 @@ func (e *excelInfo) CreateScheduleSheet(sheetName string,
 }
 
 func (e *excelInfo) CreateJudgeQueueSheet(sheetName string,
-	teams []map[string]string, team_keys map[string]int,
-	judging []map[string]string, judging_keys map[string]int, judging_headers map[string]string,
-	matches []map[string]string, match_keys map[string]int, match_headers map[string]string) (bool, error) {
+	teams []map[string]string, teamKeys map[string]int,
+	judging []map[string]string, judgingKeys map[string]int, judgingHeaders map[string]string,
+	matches []map[string]string, matchKeys map[string]int, matchHeaders map[string]string) (bool, error) {
 
 	fmt.Printf("Creating sheet: %s\n", sheetName)
 	if e.excelFile == nil {
@@ -604,24 +607,24 @@ func (e *excelInfo) CreateJudgeQueueSheet(sheetName string,
 		}
 		return itime.Before(jtime)
 	})
-	room_order := []string{}
-	for r := range judging_keys {
+	roomOrder := []string{}
+	for r := range judgingKeys {
 		if (r != "time") && (r != "notes") {
-			room_order = append(room_order, r)
+			roomOrder = append(roomOrder, r)
 		}
 	}
-	sort.Slice(room_order, func(i, j int) bool {
-		return judging_keys[room_order[i]] < judging_keys[room_order[j]]
+	sort.Slice(roomOrder, func(i, j int) bool {
+		return judgingKeys[roomOrder[i]] < judgingKeys[roomOrder[j]]
 	})
 
 	// Get a map of teams and matches
-	for _, room := range room_order {
+	for _, room := range roomOrder {
 		for _, judgingSlot := range judging {
 			if judgingSlot[room] != "" {
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.JUDGING_TEAM_NUMREF, row), judgingSlot[room])
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.JUDGING_TEAM_NAMEREF, row), getTeamNameByNumber(teams, judgingSlot[room]))
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.JUDGING_START_TIME_REF, row), judgingSlot["time"])
-				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.JUDGING_ROOM_REF, row), judging_headers[room])
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.JUDGING_ROOM_REF, row), judgingHeaders[room])
 				row++
 			}
 		}
@@ -688,9 +691,9 @@ func (e *excelInfo) CreateJudgeQueueSheet(sheetName string,
 }
 
 func (e *excelInfo) CreateMatchQueueSheet(sheetName string,
-	teams []map[string]string, team_keys map[string]int,
-	judging []map[string]string, judging_keys map[string]int, judging_headers map[string]string,
-	matches []map[string]string, match_keys map[string]int, match_headers map[string]string) (bool, error) {
+	teams []map[string]string, teamKeys map[string]int,
+	judging []map[string]string, judgingKeys map[string]int, judgingHeaders map[string]string,
+	matches []map[string]string, matchKeys map[string]int, matchHeaders map[string]string) (bool, error) {
 
 	fmt.Printf("Creating sheet: %s\n", sheetName)
 	if e.excelFile == nil {
@@ -727,7 +730,7 @@ func (e *excelInfo) CreateMatchQueueSheet(sheetName string,
 	e.excelFile.SetCellStyle(sheetName, fmt.Sprintf(e.MATCH_TEAM_NUMREF, row-1), fmt.Sprintf(e.MATCH_TABLE_REF, row), e.styleBold)
 	row++
 
-	wildCardMatches := matchespkg.FindWildCardMatches(matches, match_keys)
+	wildCardMatches := matchespkg.FindWildCardMatches(matches, matchKeys)
 	sort.Slice(matches, func(i, j int) bool {
 		// Normalize from "09:30 AM" to "09:30AM" to parse correctly
 		re := regexp.MustCompile(`\s+`) // Matches one or more whitespace characters
@@ -744,13 +747,13 @@ func (e *excelInfo) CreateMatchQueueSheet(sheetName string,
 		return itime.Before(jtime)
 	})
 	table_order := []string{}
-	for r := range match_keys {
+	for r := range matchKeys {
 		if (r != "time") && (r != "practice") && (r != "notes") {
 			table_order = append(table_order, r)
 		}
 	}
 	sort.Slice(table_order, func(i, j int) bool {
-		return match_keys[table_order[i]] < match_keys[table_order[j]]
+		return matchKeys[table_order[i]] < matchKeys[table_order[j]]
 	})
 
 	rounds := map[string]int{}
@@ -766,14 +769,14 @@ func (e *excelInfo) CreateMatchQueueSheet(sheetName string,
 					e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_ROUND_REF, row), fmt.Sprintf("Comp"))
 				}
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_START_REF, row), match["time"])
-				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TABLE_REF, row), match_headers[table])
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TABLE_REF, row), matchHeaders[table])
 				row++
 			} else if matchespkg.IsWildCardMatchOnTable(wildCardMatches, match["time"], table) {
 				wild_card_match := matchespkg.GetWildCardMatchOnTable(wildCardMatches, match["time"], table)
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TEAM_NAMEREF, row), "Wild Card Team")
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_ROUND_REF, row), "Wild Card")
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_START_REF, row), wild_card_match.Time)
-				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TABLE_REF, row), match_headers[wild_card_match.WildCardTable])
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TABLE_REF, row), matchHeaders[wild_card_match.WildCardTable])
 				row++
 			}
 		}
@@ -849,9 +852,9 @@ func getTeamNameByNumber(teams []map[string]string, teamnumber string) string {
 }
 
 func (e *excelInfo) CreateEmceeSheet(sheetName string,
-	teams []map[string]string, team_keys map[string]int,
-	judging []map[string]string, judging_keys map[string]int, judging_headers map[string]string,
-	matches []map[string]string, match_keys map[string]int, match_headers map[string]string) (bool, error) {
+	teams []map[string]string, teamKeys map[string]int,
+	judging []map[string]string, judgingKeys map[string]int, judgingHeaders map[string]string,
+	matches []map[string]string, matchKeys map[string]int, matchHeaders map[string]string) (bool, error) {
 	fmt.Printf("Creating sheet: %s\n", sheetName)
 	if e.excelFile == nil {
 		return false, fmt.Errorf("excel file is not initialized")
@@ -903,19 +906,19 @@ func (e *excelInfo) CreateEmceeSheet(sheetName string,
 		return itime.Before(jtime)
 	})
 	table_order := []string{}
-	for r := range match_keys {
+	for r := range matchKeys {
 		if (r != "time") && (r != "practice") && (r != "notes") {
 			table_order = append(table_order, r)
 		}
 	}
 	sort.Slice(table_order, func(i, j int) bool {
-		return match_keys[table_order[i]] < match_keys[table_order[j]]
+		return matchKeys[table_order[i]] < matchKeys[table_order[j]]
 	})
 
 	lastTime := matches[0]["time"]
 	grayLine := false
 	count := 0
-	wildCardMatches := matchespkg.FindWildCardMatches(matches, match_keys)
+	wildCardMatches := matchespkg.FindWildCardMatches(matches, matchKeys)
 	for _, match := range matches {
 		for _, table := range table_order {
 			if match[table] != "" {
@@ -937,7 +940,7 @@ func (e *excelInfo) CreateEmceeSheet(sheetName string,
 					e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.EMCEE_ROUND_REF, row), "Comp")
 				}
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_START_REF, row), match["time"])
-				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TABLE_REF, row), match_headers[table])
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TABLE_REF, row), matchHeaders[table])
 				if grayLine {
 					e.excelFile.SetCellStyle(sheetName, fmt.Sprintf(e.EMCEE_TEAM_NUMREF, row), fmt.Sprintf(e.EMCEE_TABLE_REF, row), e.styleGreyBar)
 				}
@@ -958,7 +961,7 @@ func (e *excelInfo) CreateEmceeSheet(sheetName string,
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.EMCEE_TEAM_NAMEREF, row), "Wild Card Team")
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.EMCEE_ROUND_REF, row), "Wild Card")
 				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_START_REF, row), wild_card_match.Time)
-				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TABLE_REF, row), match_headers[wild_card_match.WildCardTable])
+				e.excelFile.SetCellValue(sheetName, fmt.Sprintf(e.MATCH_TABLE_REF, row), matchHeaders[wild_card_match.WildCardTable])
 				if grayLine {
 					e.excelFile.SetCellStyle(sheetName, fmt.Sprintf(e.EMCEE_TEAM_NUMREF, row), fmt.Sprintf(e.EMCEE_TABLE_REF, row), e.styleGreyBar)
 				}

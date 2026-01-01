@@ -21,12 +21,12 @@ func main() {
 	flag.StringVar(&spreadsheetName, "spreadsheet", "", "If you want a spreadsheet with reports provide the name of the spreadsheet to create")
 	flag.Parse()
 
-	teams, team_keys, _, err := csvmap.ReadCSVToMaps(teamcsv)
+	teams, teamKeys, _, err := csvmap.ReadCSVToMaps(teamcsv)
 	if err != nil {
 		log.Fatalf("teams read error: %v", err)
 	}
 
-	judging, judging_keys, judging_headers, err := csvmap.ReadCSVToMaps(judgingschedulecsv)
+	judging, judgingKeys, judgingHeaders, err := csvmap.ReadCSVToMaps(judgingschedulecsv)
 	if err != nil {
 		log.Fatalf("judging read error: %v", err)
 	}
@@ -41,22 +41,22 @@ func main() {
 		}
 
 		// Create the sheets
-		_, err := e.CreateScheduleSheet("Schedule", teams, team_keys, judging, judging_keys, judging_headers, games, game_keys, game_headers)
+		_, err := e.CreateScheduleSheet("Schedule", teams, teamKeys, judging, judgingKeys, judgingHeaders, games, game_keys, game_headers)
 		if err != nil {
 			log.Fatalf("Failed to create schedule sheet: %v", err)
 		}
 
-		_, err = e.CreateJudgeQueueSheet("JudgeQueueing", teams, team_keys, judging, judging_keys, judging_headers, games, game_keys, game_headers)
+		_, err = e.CreateJudgeQueueSheet("JudgeQueueing", teams, teamKeys, judging, judgingKeys, judgingHeaders, games, game_keys, game_headers)
 		if err != nil {
 			log.Fatalf("Failed to create judge queueing sheet: %v", err)
 		}
 
-		_, err = e.CreateMatchQueueSheet("MatchQueueing", teams, team_keys, judging, judging_keys, judging_headers, games, game_keys, game_headers)
+		_, err = e.CreateMatchQueueSheet("MatchQueueing", teams, teamKeys, judging, judgingKeys, judgingHeaders, games, game_keys, game_headers)
 		if err != nil {
 			log.Fatalf("Failed to create Match queueing sheet: %v", err)
 		}
 
-		_, err = e.CreateEmceeSheet("EmceeReport", teams, team_keys, judging, judging_keys, judging_headers, games, game_keys, game_headers)
+		_, err = e.CreateEmceeSheet("EmceeReport", teams, teamKeys, judging, judgingKeys, judgingHeaders, games, game_keys, game_headers)
 		if err != nil {
 			log.Fatalf("Failed to create Match queueing sheet: %v", err)
 		}
